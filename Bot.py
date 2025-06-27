@@ -10,10 +10,8 @@ CHAT_ID = "7765972595"
 TIMEZONE = pytz.timezone("Asia/Kolkata")
 INTERVAL = 30  # minutes
 
-SYMBOLS = [
-    "BTC/USD", "XAU/USD", "USD/JPY", "USD/CAD",
-    "AUD/USD", "NZD/USD", "GBP/USD", "EUR/USD"
-]
+SYMBOLS = ["BTC/USD", "XAU/USD", "USD/JPY", "USD/CAD",
+           "AUD/USD", "NZD/USD", "GBP/USD", "EUR/USD"]
 
 bot = telegram.Bot(token=BOT_TOKEN)
 app = FastAPI()
