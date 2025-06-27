@@ -1,10 +1,11 @@
 fastapi
 uvicorn
+apscheduler
+python-telegram-bot==20.6
+matplotlib
 pandas
 numpy
-matplotlib
-requests
-python-telegram-bot
-apscheduler
 ta
+requests
 pytz
+nest_asyncio
