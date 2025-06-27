@@ -1,145 +1,118 @@
+import requests
 import pandas as pd
 import numpy as np
-import requests
-import datetime as dt
-import pytz
-import asyncio
 import matplotlib.pyplot as plt
-import mplfinance as mpf
-from ta import trend, momentum
-from telegram import Bot
+import os
+import datetime
+import pytz
 from apscheduler.schedulers.blocking import BlockingScheduler
+import telegram
 
-# Credentials
-TELEGRAM_BOT_TOKEN = "7613620588:AAEui2boeLqJ7ukxmjiiUNF8njOgEUoWRM8"
-TELEGRAM_CHAT_ID = "7765972595"
-TWELVE_DATA_API_KEY = "d84bb3f43e4740e89e1368a29861d31d"
+# === CONFIG ===
+API_KEY = "fa799057279a4b3eb061e80b4b6504a6"
+BOT_TOKEN = "7613620588:AAEui2boeLqJ7ukxmjiiUNF8njOgEUoWRM8"
+CHAT_ID = "<YOUR_CHAT_ID>"  # Replace this
+SYMBOLS = ["BTC/USD", "EUR/USD", "USD/JPY", "GBP/USD", "XAU/USD"]
+TIMEFRAME = "1h"
+INTERVAL = 60  # minutes
+TIMEZONE = pytz.timezone("Asia/Kolkata")
+bot = telegram.Bot(token=BOT_TOKEN)
 
-symbols = ["BTC/USD", "XAU/USD", "AUD/USD", "CAD/USD", "EUR/USD", "GBP/USD", "NZD/USD", "JPY/USD"]
-
+# === Fetch Data ===
 def fetch_data(symbol):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=30min&outputsize=100&apikey={TWELVE_DATA_API_KEY}"
-    r = requests.get(url).json()
-    if "values" not in r:
-        raise Exception(f"{symbol} fetch failed: {r.get('message')}")
-    df = pd.DataFrame(r["values"]).rename(columns={"datetime": "time"}).sort_values("time")
-    df["time"] = pd.to_datetime(df["time"])
-    df.set_index("time", inplace=True)
+    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={TIMEFRAME}&apikey={API_KEY}&outputsize=100"
+    r = requests.get(url)
+    data = r.json()
+    if "values" not in data:
+        print(f"[{symbol}] ❌ Data fetch failed.")
+        return None
+    df = pd.DataFrame(data['values'])
+    df = df.iloc[::-1]
+    df['datetime'] = pd.to_datetime(df['datetime'])
+    df.set_index('datetime', inplace=True)
     df = df.astype(float)
     return df
 
-def apply_indicators(df):
-    df["EMA20"] = trend.ema_indicator(df["close"], window=20)
-    df["EMA50"] = trend.ema_indicator(df["close"], window=50)
-    df["RSI"] = momentum.rsi(df["close"], window=14)
-    df["MACD_Hist"] = trend.macd_diff(df["close"])
+# === Indicators ===
+def add_indicators(df):
+    df['EMA20'] = df['close'].ewm(span=20).mean()
+    df['EMA50'] = df['close'].ewm(span=50).mean()
+    df['RSI'] = compute_rsi(df['close'], 14)
+    df['MACD'] = df['close'].ewm(12).mean() - df['close'].ewm(26).mean()
+    df['Signal'] = df['MACD'].ewm(9).mean()
     return df
 
-def detect_zones(df):
-    return df["high"].rolling(20).max().iloc[-1], df["low"].rolling(20).min().iloc[-1]
+def compute_rsi(series, period=14):
+    delta = series.diff()
+    gain = np.where(delta > 0, delta, 0)
+    loss = np.where(delta < 0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(window=period).mean()
+    avg_loss = pd.Series(loss).rolling(window=period).mean()
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return pd.Series(rsi, index=series.index)
 
-def confirm_price_action(df):
-    last3 = df.iloc[-3:]
-    bullish = all(row["close"] > row["open"] for _, row in last3.iterrows())
-    bearish = all(row["close"] < row["open"] for _, row in last3.iterrows())
-    return "BUY" if bullish else "SELL" if bearish else None
-
+# === Signal Strategy ===
 def detect_signal(df):
     last = df.iloc[-1]
-    signal = confirm_price_action(df)
-    if not signal:
-        return None, 0
-    ema = last["EMA20"] > last["EMA50"] if signal == "BUY" else last["EMA20"] < last["EMA50"]
-    rsi = last["RSI"] > 50 if signal == "BUY" else last["RSI"] < 50
-    macd = last["MACD_Hist"] > 0 if signal == "BUY" else last["MACD_Hist"] < 0
-    demand, supply = detect_zones(df)
-    breakout = last["close"] > supply * 1.001 if signal == "BUY" else last["close"] < demand * 0.999
-    score = sum([ema, rsi, macd, breakout])
-    return (signal, score) if score == 4 else (None, 0)
+    prev = df.iloc[-2]
+    buy = (
+        prev['EMA20'] < prev['EMA50'] and last['EMA20'] > last['EMA50'] and
+        last['RSI'] > 50 and
+        last['MACD'] > last['Signal']
+    )
+    sell = (
+        prev['EMA20'] > prev['EMA50'] and last['EMA20'] < last['EMA50'] and
+        last['RSI'] < 50 and
+        last['MACD'] < last['Signal']
+    )
+    if buy:
+        return "BUY"
+    elif sell:
+        return "SELL"
+    return None
 
-def calculate_tp_sl(df, signal):
-    close = df["close"].iloc[-1]
-    high = df["high"].iloc[-20:].max()
-    low = df["low"].iloc[-20:].min()
-    rng = high - low
-    if signal == "BUY":
-        tp, sl = close + rng * 0.25, close - rng * 0.08
-    elif signal == "SELL":
-        tp, sl = close - rng * 0.25, close + rng * 0.08
-    else:
-        return None, None
-    tp_dist = abs(tp - close)
-    sl_dist = abs(sl - close)
-    return (sl, tp) if tp_dist >= rng * 0.2 and sl_dist <= rng * 0.1 else (None, None)
+# === Plot Chart ===
+def plot_chart(df, signal, symbol):
+    plt.style.use('seaborn-dark')
+    fig, ax = plt.subplots(figsize=(8, 4))
+    df.tail(30)['close'].plot(ax=ax, label="Close", color='blue')
+    df.tail(30)['EMA20'].plot(ax=ax, label="EMA20", color='green')
+    df.tail(30)['EMA50'].plot(ax=ax, label="EMA50", color='red')
+    ax.set_title(f"{symbol} - Signal: {signal}")
+    ax.legend()
+    chart_path = f"/tmp/{symbol.replace('/', '')}_chart.png"
+    plt.savefig(chart_path, bbox_inches='tight')
+    plt.close()
+    return chart_path
 
-def plot_chart(df, symbol, signal, entry, sl, tp):
-    dfp = df[-50:]
-    apds = [
-        mpf.make_addplot(dfp["EMA20"], color='blue'),
-        mpf.make_addplot(dfp["EMA50"], color='red'),
-        mpf.make_addplot(dfp["RSI"], panel=1, color='purple'),
-        mpf.make_addplot(dfp["MACD_Hist"], panel=2, type='bar', color='green')
-    ]
-    fig, _ = mpf.plot(
-        dfp, type='candle', volume=False, addplot=apds,
-        hlines=dict(hlines=[entry, sl, tp], colors=['blue', 'red', 'green'], linestyle='--'),
-        style='yahoo', title=f"{symbol} - {signal}", returnfig=True, figsize=(8,6))
-    filename = f"{symbol.replace('/', '')}_{signal}.png"
-    fig.savefig(filename)
-    plt.close(fig)
-    return filename
+# === Send Alert ===
+def send_telegram_alert(symbol, signal, chart_path):
+    msg = f"📊 {symbol}\nSignal: {signal}\nTime: {datetime.datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M')}"
+    with open(chart_path, 'rb') as img:
+        bot.send_photo(chat_id=CHAT_ID, photo=img, caption=msg)
 
-async def send_alert(symbol, signal, entry, sl, tp, file):
-    msg = f"""📡 {symbol} — {signal}
-💰 Entry: {entry:.2f}
-🎯 TP: {tp:.2f}
-🛡️ SL: {sl:.2f}
-
-✅ Triple Indicator + Price Action"""
-    bot = Bot(TELEGRAM_BOT_TOKEN)
-    with open(file, 'rb') as img:
-        await bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=img, caption=msg)
-
-def send_alert_sync(*args):
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        loop.create_task(send_alert(*args))
-    else:
-        loop.run_until_complete(send_alert(*args))
-
-last_signal = {}
-
-def scan_symbol(symbol):
-    try:
-        df = fetch_data(symbol)
-        df = apply_indicators(df)
-        signal, score = detect_signal(df)
-        if signal and last_signal.get(symbol) != signal:
-            entry = df["close"].iloc[-1]
-            sl, tp = calculate_tp_sl(df, signal)
-            if sl and tp:
-                chart = plot_chart(df, symbol, signal, entry, sl, tp)
-                send_alert_sync(symbol, signal, entry, sl, tp, chart)
-                last_signal[symbol] = signal
-                print(f"✅ {symbol} {signal} sent")
-            else:
-                print(f"🚫 {symbol}: TP/SL invalid")
-        else:
-            print(f"⏸️ {symbol}: No signal")
-    except Exception as e:
-        print(f"❌ {symbol} error: {e}")
-
+# === Main Scan ===
 def scan_all():
-    now = dt.datetime.now(pytz.timezone("Asia/Kolkata"))
-    print(f"
-🔁 Scan: {now.strftime('%Y-%m-%d %H:%M:%S')} IST")
-    for sym in symbols:
-        scan_symbol(sym)
+    now = datetime.datetime.now(TIMEZONE).strftime('%Y-%m-%d %H:%M')
+    print(f"\n=== 🔁 Scanning @ {now} ===")
+    for symbol in SYMBOLS:
+        print(f"📥 {symbol}...", end=" ")
+        df = fetch_data(symbol)
+        if df is None: continue
+        df = add_indicators(df)
+        signal = detect_signal(df)
+        if signal:
+            print(f"✅ {signal}")
+            chart = plot_chart(df, signal, symbol)
+            send_telegram_alert(symbol, signal, chart)
+        else:
+            print("No clear signal.")
 
-scheduler = BlockingScheduler(timezone="Asia/Kolkata")
-scheduler.add_job(scan_all, "interval", minutes=30)
-
+# === Schedule Job ===
 if __name__ == "__main__":
-    print("🚀 EA V3 Bot Running on Render")
-    scan_all()
+    scheduler = BlockingScheduler(timezone=TIMEZONE)
+    scheduler.add_job(scan_all, 'interval', minutes=INTERVAL)
+    print("🚀 Bot running every 15 minutes...\n")
+    scan_all()  # Run once at start
     scheduler.start()
