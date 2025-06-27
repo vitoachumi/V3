@@ -1,0 +1,9 @@
+pandas
+numpy
+matplotlib
+mplfinance
+ta
+requests
+python-telegram-bot==20.6
+apscheduler
+pytz
