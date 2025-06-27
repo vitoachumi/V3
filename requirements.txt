@@ -1,9 +1,10 @@
-requests
+fastapi
+uvicorn
 pandas
 numpy
 matplotlib
+requests
 python-telegram-bot
 apscheduler
+ta
 pytz
-fastapi
-uvicorn
