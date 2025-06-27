@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from apscheduler.schedulers.blocking import BlockingScheduler
 
 # === CONFIG ===
-API_KEY = "fa799057279a4b3eb061e80b4b6504a6"
+API_KEY = "c78b6090d46845e0b311cc92ebb0b13d"
 BOT_TOKEN = "7613620588:AAEui2boeLqJ7ukxmjiiUNF8njOgEUoWRM8"
 CHAT_ID = "7765972595"
 TIMEZONE = pytz.timezone("Asia/Kolkata")
