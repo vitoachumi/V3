@@ -1,6 +1,6 @@
-# V3 SIGNAL BOT 📱 - Render + UptimeRobot Edition
-import pandas as pd, numpy as np, matplotlib.pyplot as plt, requests, datetime, pytz, hashlib, io
-import telegram, threading, uvicorn
+# V3 SIGNAL BOT 📱 Horizontal View for Render
+import pandas as pd, numpy as np, requests, matplotlib.pyplot as plt, datetime, pytz, io, hashlib, threading
+import telegram, uvicorn
 from fastapi import FastAPI
 from apscheduler.schedulers.blocking import BlockingScheduler
 from ta.trend import EMAIndicator, MACD
@@ -10,18 +10,17 @@ from ta.momentum import RSIIndicator
 API_KEY = "c78b6090d46845e0b311cc92ebb0b13d"
 BOT_TOKEN = "7613620588:AAEui2boeLqJ7ukxmjiiUNF8njOgEUoWRM8"
 CHAT_ID = "7765972595"
-TIMEZONE = pytz.timezone("Asia/Kolkata")
 SYMBOLS = ["BTC/USD", "XAU/USD", "EUR/USD", "USD/CAD", "GBP/USD", "USD/JPY", "AUD/USD", "NZD/USD"]
-INTERVAL_MINUTES = 30
+TIMEZONE = pytz.timezone("Asia/Kolkata")
 LAST_SIGNAL = {}
+INTERVAL_MINUTES = 30
 
 bot = telegram.Bot(token=BOT_TOKEN)
 app = FastAPI()
 
 @app.get("/")
-@app.head("/")
 def home():
-    return {"status": "✅ V3 Signal Bot Online"}
+    return {"status": "✅ V3 Signal Bot is Running"}
 
 def fetch(symbol):
     url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval=30min&outputsize=100&apikey={API_KEY}"
@@ -79,18 +78,19 @@ def calculate_tp_sl(df, direction):
     sl = close - range_ * 0.08 if direction == "BUY" else close + range_ * 0.08
     tp_pct = abs(tp - close) / close * 100
     sl_pct = abs(sl - close) / close * 100
-    if tp_pct > 15 and sl_pct < 10 and round(tp, 2) != round(sl, 2): return sl, tp
+    if tp_pct > 15 and sl_pct < 10 and round(tp, 2) != round(sl, 2):
+        return sl, tp
     return None, None
 
-def draw_chart(df, symbol, sig, pattern1, pattern2, sl, tp):
+def draw_chart(df, symbol, sig, pat1, pat2, sl, tp):
     plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(7, 2.5))  # 📱 Horizontal layout only
+    fig, ax = plt.subplots(figsize=(6.5, 2.3))  # 📱 horizontal layout
     df["close"].tail(30).plot(ax=ax, color='cyan', label="Close")
     df["EMA20"].tail(30).plot(ax=ax, color='lime', label="EMA20", lw=0.8)
     df["EMA50"].tail(30).plot(ax=ax, color='red', label="EMA50", lw=0.8)
     ax.axhline(tp, color="green", linestyle="--", lw=0.6)
     ax.axhline(sl, color="orange", linestyle="--", lw=0.6)
-    ax.set_title(f"{symbol} • {sig} • {pattern1} • {pattern2}", fontsize=9)
+    ax.set_title(f"{symbol} • {sig} • {pat1} • {pat2}", fontsize=9)
     ax.legend(fontsize=6, ncol=4, loc="upper left")
     plt.grid(alpha=0.2)
     plt.tight_layout()
@@ -109,7 +109,7 @@ def alert(sym, sig, sl, tp, pat1, pat2, img):
 📍 SL: {sl:.2f}
 🎯 TP: {tp:.2f}
 🕐 {now}
-🧪 EMA + RSI + MACD Confirmed"""
+🧪 Confirmed by EMA+RSI+MACD"""
     bot.send_photo(chat_id=CHAT_ID, photo=img, caption=msg)
 
 def hash_signal(sym, sig, sl, tp):
@@ -117,7 +117,7 @@ def hash_signal(sym, sig, sl, tp):
 
 def is_market_open():
     now = datetime.datetime.now(TIMEZONE)
-    return now.weekday() < 5 and 5 <= now.hour < 23  # Mon–Fri 5AM–11PM IST
+    return now.weekday() < 5 and 5 <= now.hour < 23
 
 def scan():
     print(f"\n⏰ Scan @ {datetime.datetime.now(TIMEZONE).strftime('%H:%M')}")
@@ -138,10 +138,10 @@ def scan():
         chart = draw_chart(df, sym, sig, pat1, pat2, sl, tp)
         alert(sym, sig, sl, tp, pat1, pat2, chart)
 
-# Run Render + UptimeRobot + 30-min scan
+# Start Render Server + UptimeRobot
 if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone=TIMEZONE)
     scheduler.add_job(scan, "interval", minutes=INTERVAL_MINUTES)
-    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=10000)).start()
+    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=10001)).start()
     scan()
     scheduler.start()
