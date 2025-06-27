@@ -1,8 +1,7 @@
-# 📦 Dependencies (install in Colab or environment)
 # !pip install pandas numpy matplotlib requests ta fastapi uvicorn python-telegram-bot apscheduler --quiet
 
 import pandas as pd, numpy as np, matplotlib.pyplot as plt, requests, datetime, pytz, io, hashlib, threading
-import telegram, uvicorn
+import telegram
 from fastapi import FastAPI
 from apscheduler.schedulers.blocking import BlockingScheduler
 from ta.trend import EMAIndicator, MACD
@@ -55,7 +54,7 @@ def detect_candle(df):
     if last["close"] < last["open"] and prev["close"] > prev["open"]: return "Bearish Engulfing"
     return "Neutral"
 
-# === 🪜 Chart Patterns (simple wedge detector) ===
+# === 🪜 Chart Patterns ===
 def detect_chart(df):
     close = df["close"].tail(20)
     highs = close.rolling(3).max()
@@ -91,7 +90,7 @@ def tp_sl(df, direction):
 # === 📷 Chart Screenshot ===
 def draw(df, sym, sig, candle, chart, sl, tp):
     plt.style.use("dark_background")
-    fig, ax = plt.subplots(figsize=(6.5, 2.2))  # 📱 Horizontal layout
+    fig, ax = plt.subplots(figsize=(6.5, 2.2))  # 📱 Horizontal mobile view
     df["close"].tail(30).plot(ax=ax, color="cyan", label="Close")
     df["EMA20"].tail(30).plot(ax=ax, color="lime", label="EMA20")
     df["EMA50"].tail(30).plot(ax=ax, color="red", label="EMA50")
@@ -148,10 +147,8 @@ def scan():
         img = draw(df, sym, sig, candle, chart, sl, tp)
         send_alert(sym, sig, sl, tp, candle, chart, img)
 
-# === 🖥️ Run on Render (with port and scheduler)
-if __name__ == "__main__":
-    scheduler = BlockingScheduler(timezone=TIMEZONE)
-    scheduler.add_job(scan, "interval", minutes=INTERVAL_MINUTES)
-    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=10001)).start()
-    scan()
-    scheduler.start()
+# === ✅ Start scan & scheduler regardless of __main__
+scheduler = BlockingScheduler(timezone=TIMEZONE)
+scheduler.add_job(scan, "interval", minutes=INTERVAL_MINUTES)
+scan()  # Run immediately on startup
+threading.Thread(target=scheduler.start, daemon=True).start()
