@@ -139,6 +139,6 @@ def scan():
 if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone=TIMEZONE)
     scheduler.add_job(scan, "interval", minutes=INTERVAL_MINUTES)
-    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=PORT)).start()
+    threading.Thread(target=lambda: uvicorn.run(app, host="0.0.0.0", port=10001)).start()
     scan()
     scheduler.start()
